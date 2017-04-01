@@ -3,41 +3,21 @@ import tensorflow.contrib.layers as ly
 import numpy as np
 import time
 
-VGG_MEAN = [103.939, 116.779, 123.68]
-
 
 class vincent:
-    def __init__(self, r=1e-6, lr=5e-4, vgg19_npy_path=None):
+    def __init__(self, r=0., lr=1e-4, vgg19_npy_path=None):
         self.data_dict = np.load(vgg19_npy_path, encoding='latin1').item()
         print("npy file loaded")
         self.r = r
         self.lr = lr
 
     def build(self, rgb):
-        """
-        load variable from npy to build the VGG
-
-        :param rgb: rgb image [batch, height, width, 3] values scaled [0, 1]
-        """
-
         start_time = time.time()
         print("build model started")
-        rgb_scaled = rgb
-
-        # Convert RGB to BGR
-        red, green, blue = tf.split(axis=3,
-                                    num_or_size_splits=3, value=rgb_scaled)
-        self.rgb =rgb
-        assert red.get_shape().as_list()[1:] == [224, 224, 1]
-        assert green.get_shape().as_list()[1:] == [224, 224, 1]
-        assert blue.get_shape().as_list()[1:] == [224, 224, 1]
-        bgr = tf.concat(concat_dim=3, values=[
-            blue - VGG_MEAN[0],
-            green - VGG_MEAN[1],
-            red - VGG_MEAN[2],
-        ])
-        assert bgr.get_shape().as_list()[1:] == [224, 224, 3]
-        self.feature_1 = self.extractor(bgr, name='extractor_1')
+        rgb_scaled = rgb / 255.0
+        self.debug_rgb = rgb_scaled
+        print self.ten_sh(tf.stack(tf.unpack(rgb_scaled)[0:1]))
+        self.feature_1 = self.extractor(rgb_scaled, name='extractor_1')
         feature_lists = tf.unpack(self.feature_1['conv4_1'], axis=0)
         self.feature_con = tf.stack(feature_lists[0:1])
         self.feature_sty = tf.stack(feature_lists[1:])
@@ -53,8 +33,6 @@ class vincent:
                                                scale=self.std,
                                                variance_epsilon=1e-6
                                                )
-        self.AdaIn = tf.divide(self.AdaIn, tf.reduce_mean(self.AdaIn))
-
         self.tconv4_1 = self.tconv_ly(self.AdaIn, 512, 256, 'tc4_1')
         self.up3 = self.up_sampling(self.tconv4_1, 'up_3')
         self.tconv3_4 = self.tconv_ly(self.up3, 256, 256, 'tc3_4')
@@ -68,35 +46,31 @@ class vincent:
         self.tconv1_2 = self.tconv_ly(self.up1, 64, 64, 'tc1_2')
         self.tconv1_1 = self.tconv_ly(self.tconv1_2, 64, 3, 'tc1_1')
 
-        # bgr to rgb
-        blue, green, red = tf.split(axis=3,
-                                    num_or_size_splits=3, value=self.tconv1_1)
-        self.output = tf.concat(concat_dim=3, values=[
-            red + VGG_MEAN[2],
-            green + VGG_MEAN[1],
-            blue + VGG_MEAN[0],
-        ])
-
+        self.output = self.tconv1_1*255.0
         # loss
-        self.debug_loss = self.MSE(self.tconv1_1, tf.stack(tf.unpack(bgr)[0:1]))
         self.feature_2 = self.extractor(self.tconv1_1, name='extractor_2')
-        print 'check', self.ten_sh(self.feature_2['conv4_1']), self.ten_sh(self.AdaIn)
         self.content_loss = self.MSE(self.feature_2['conv4_1'], self.AdaIn)
         style_loss_list = []
         for fea_1, fea_2 in zip(self.feature_1.values(),
                                 self.feature_2.values()):
-            mean_1, var_1 = tf.nn.moments(tf.stack(tf.unpack(fea_1)[1:]), [1, 2])
+            mean_1, var_1 = tf.nn.moments(tf.stack(tf.unpack(fea_1)[1:]),
+                                          [1, 2])
+            std_1 = tf.sqrt(var_1)
             print 'mean_1', self.ten_sh(mean_1)
             mean_2, var_2 = tf.nn.moments(fea_2, [1, 2])
+            std_2 = tf.sqrt(var_2)
             print 'mean_2', self.ten_sh(mean_2)
             style_loss_list.append(self.MSE(mean_1, mean_2))
-            style_loss_list.append(self.MSE(var_1, var_2))
+            style_loss_list.append(self.MSE(std_1, std_2))
+
+        print(("build model finished: %ds" % (time.time() - start_time)))
 
         self.style_loss = tf.add_n(style_loss_list)
         self.loss = self.content_loss + tf.multiply(self.r, self.style_loss)
-        # optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
-        # optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
+        print(("build model finished: %ds" % (time.time() - start_time)))
+        #optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
+        #optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr)
         self.opt = optimizer.minimize(self.loss)
         self.debug_opt = optimizer.minimize(self.debug_loss)
         print(("build model finished: %ds" % (time.time() - start_time)))
@@ -123,7 +97,7 @@ class vincent:
             return feature_dict
 
     def MSE(self, target, pred):
-        return tf.reduce_mean(tf.sqrt(tf.square(tf.subtract(target, pred))))
+        return tf.reduce_mean(tf.abs(tf.subtract(target, pred)))
 
     def up_sampling(self, bottom, name=None):
         size = self.ten_sh(bottom)[1:3]
@@ -153,7 +127,6 @@ class vincent:
                                                 activation_fn=tf.nn.relu,
                                                 weights_initializer=init,
                                                 biases_initializer=init,
-                                                normalizer_fn=ly.batch_norm,
                                                 trainable=True
                                                 )
             print self.ten_sh(output)

@@ -25,16 +25,12 @@ step = 1
 f_d = {rgb: np.asarray([content, style])}
 
 while step < train_iters:
-    ou, std, c_loss, s_loss, _ = sess.run([V.output, V.std, V.debug_loss, V.style_loss, V.debug_opt],
-                                 feed_dict=f_d)
-    print 'std min', np.min(std)
-    print 'std max', np.max(std)
+    ou, c_loss, s_loss, _  = sess.run([V.output, V.content_loss, V.style_loss, V.opt],
+                             feed_dict=f_d)
+    debug_rgb = sess.run(V.debug_rgb, feed_dict=f_d)
+    print np.max(debug_rgb[1:,...])
     print 'ou', np.mean(ou)
-    if np.min(std) < 0:
-        print '############################################'
-        break
-    print ('at epoch {0}, content loss is {1}, style loss is {2}'.
-           format(step, c_loss, s_loss))
+    print ('at epoch {0}, content loss is {1}, style loss is {2}'.format(step, c_loss, s_loss))
 #    debug = sess.run(V.feature_con, feed_dict=f_d)
 #    print np.max(debug)
     if step % eval_step == 0:
