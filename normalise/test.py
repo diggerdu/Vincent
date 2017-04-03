@@ -25,11 +25,13 @@ step = 1
 f_d = {rgb: np.asarray([content, style])}
 
 while step < train_iters:
-    ou, c_loss, s_loss, _  = sess.run([V.output, V.content_loss, V.style_loss, V.opt],
+    ou, c_loss, s_loss  = sess.run([V.output, V.content_loss, V.style_loss, ],
                              feed_dict=f_d)
     debug_rgb = sess.run(V.debug_rgb, feed_dict=f_d)
     print np.max(debug_rgb[1:,...])
-    print 'ou', np.mean(ou)
+    print 'ou_r', np.mean(ou[..., 0])
+    print 'ou_g', np.mean(ou[..., 1])
+    print 'ou_b', np.mean(ou[..., 2])
     print ('at epoch {0}, content loss is {1}, style loss is {2}'.format(step, c_loss, s_loss))
 #    debug = sess.run(V.feature_con, feed_dict=f_d)
 #    print np.max(debug)
