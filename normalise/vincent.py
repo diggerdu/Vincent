@@ -72,7 +72,7 @@ class vincent:
         #optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
         #optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr)
         self.opt = optimizer.minimize(self.loss)
-        self.debug_opt = optimizer.minimize(self.debug_loss)
+        #self.debug_opt = optimizer.minimize(self.debug_loss)
         print(("build model finished: %ds" % (time.time() - start_time)))
 
     def extractor(self, image, name):
@@ -95,6 +95,9 @@ class vincent:
             conv4_1 = self.conv_layer(pool3, "conv4_1")
             feature_dict.update({'conv4_1': conv4_1})
             return feature_dict
+    def decoder(self, fea, name):
+        with tf.variable_scope(name):
+            tconv1_1
 
     def MSE(self, target, pred):
         return tf.reduce_mean(tf.abs(tf.subtract(target, pred)))
@@ -116,33 +119,52 @@ class vincent:
     def tconv_ly(self, bottom, in_channels, out_channels, name=None):
         print name
         with tf.variable_scope(name):
+            shape = self.ten_sh(bottom)
+            shape[-1] = out_channels
+            print 'ori', self.ten_sh(bottom)
+            bottom = tf.pad(bottom,
+                            [[0, 0], [2, 2], [2, 2], [0, 0]], "REFLECT")
+            print 'bottom', self.ten_sh(bottom)
             init = ly.xavier_initializer_conv2d()
-            # init = tf.random_uniform_initializer(minval=0, maxval=1e-9)
-            #init = tf.truncated_normal_initializer(stddev=1e-2)
             output = ly.convolution2d_transpose(inputs=bottom,
                                                 num_outputs=out_channels,
                                                 kernel_size=[3, 3],
                                                 stride=[1, 1],
-                                                padding='SAME',
+                                                padding='VALID',
                                                 activation_fn=tf.nn.relu,
                                                 weights_initializer=init,
                                                 biases_initializer=init,
-                                                trainable=True
-                                                )
+                                                trainable=True)
+            output = tf.slice(output, begin=[0, 2, 2, 0], size=shape)
+            #crop_fn = tf.image.resize_image_with_crop_or_pad
+            #crop_lam = lambda img: crop_fn(img, target_height=shape[1],
+                                           #target_width=shape[2])
+            #output = tf.map_fn(crop_lam, output, parallel_iterations=shape[0])
+            #output = crop_fn(output, target_height=shape[1], target_width=shape[2])
             print self.ten_sh(output)
+
             return output
 
     def conv_layer(self, bottom, name):
         with tf.variable_scope(name):
             filt = self.get_conv_filter(name)
-
             conv = tf.nn.conv2d(bottom, filt, [1, 1, 1, 1], padding='SAME')
-
             conv_biases = self.get_bias(name)
             bias = tf.nn.bias_add(conv, conv_biases)
-
             relu = tf.nn.relu(bias)
             return relu
+
+    def tconv_layer(self, bottom, name):
+        with tf.variable_scope(name):
+            filt = self.get_conv_filter(name)
+            bottom = tf.pad(bottom,
+                            [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
+            conv = tf.nn.conv2d_transpose(bottom, filt, [1, 1, 1, 1], padding='VALID')
+            conv_biases = self.get_bias(name)
+            bias = tf.nn.bias_add(conv, conv_biases)
+            relu = tf.nn.relu(bias)
+            return relu
+
 
     def fc_layer(self, bottom, name):
         with tf.variable_scope(name):
