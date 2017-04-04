@@ -1,6 +1,7 @@
 from vincent import vincent
 import tensorflow as tf
 import numpy as np
+np.set_printoptions(precision=6, suppress=True)
 import PIL
 from PIL import Image as Im
 
@@ -10,12 +11,11 @@ train_iters = 1000000
 eval_step = 100
 
 
-content = np.uint8(np.array(Im.open('content.jpg').resize((224, 224),
+content = np.uint8(np.array(Im.open('content.jpg').resize((512, 512),
                    PIL.Image.ANTIALIAS)))
-style = np.uint8(np.array(Im.open('style.jpg').resize((224, 224),
-                 PIL.Image.ANTIALIAS)))
+style = np.uint8(np.array(Im.open('style.jpg').crop((0, 0, 512, 512))))
 V = vincent(vgg19_npy_path='vgg19_normal.npy')
-rgb = tf.placeholder(tf.float32, shape=[2, 224, 224, 3])
+rgb = tf.placeholder(tf.float32, shape=[2, 512, 512, 3])
 V.build(rgb)
 
 init = tf.global_variables_initializer()
@@ -24,20 +24,15 @@ sess.run(init)
 step = 1
 f_d = {rgb: np.asarray([content, style])}
 
-while step < train_iters:
-    ou, c_loss, s_loss  = sess.run([V.output, V.content_loss, V.style_loss, ],
-                             feed_dict=f_d)
-    debug_rgb = sess.run(V.debug_rgb, feed_dict=f_d)
-    print np.max(debug_rgb[1:,...])
-    print 'ou_r', np.mean(ou[..., 0])
-    print 'ou_g', np.mean(ou[..., 1])
-    print 'ou_b', np.mean(ou[..., 2])
-    print ('at epoch {0}, content loss is {1}, style loss is {2}'.format(step, c_loss, s_loss))
-#    debug = sess.run(V.feature_con, feed_dict=f_d)
-#    print np.max(debug)
-    if step % eval_step == 0:
-        output = np.squeeze(sess.run(V.output, feed_dict=f_d))
-        print np.max(output)
-        print output[...,0]
-        Im.fromarray(np.uint8(output)).save('output/{0}.png'.format(step))
-    step += 1
+output = sess.run(V.output, feed_dict=f_d)
+fea = sess.run(V.feature_sty, feed_dict=f_d)
+print 'feature_shape', fea.shape
+np.save('debug.npy', fea)
+
+std = sess.run(V.std, feed_dict=f_d)
+print std.shape
+print 'mean', std
+
+output = np.squeeze(output)
+print np.mean(output)
+Im.fromarray(np.uint8(output)).save('compose.png')

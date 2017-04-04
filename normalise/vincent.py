@@ -7,6 +7,8 @@ import time
 class vincent:
     def __init__(self, r=0., lr=1e-4, vgg19_npy_path=None):
         self.data_dict = np.load(vgg19_npy_path, encoding='latin1').item()
+        self.data_dict = None
+        self.decoder_data_dict = np.load('decoder.npy', encoding='latin1').item()
         print("npy file loaded")
         self.r = r
         self.lr = lr
@@ -15,15 +17,24 @@ class vincent:
         start_time = time.time()
         print("build model started")
         rgb_scaled = rgb / 255.0
-        self.debug_rgb = rgb_scaled
-        print self.ten_sh(tf.stack(tf.unpack(rgb_scaled)[0:1]))
+
         self.feature_1 = self.extractor(rgb_scaled, name='extractor_1')
-        feature_lists = tf.unpack(self.feature_1['conv4_1'], axis=0)
+        fea_sh = self.ten_sh(self.feature_1)
+        feature_lists = tf.unpack(self.feature_1, axis=0)
         self.feature_con = tf.stack(feature_lists[0:1])
         self.feature_sty = tf.stack(feature_lists[1:])
-        print self.ten_sh(self.feature_con)
-        self.mean, self.var = tf.nn.moments(self.feature_sty, [1, 2])
-        self.std = tf.sqrt(self.var)
+        self.mean = tf.reduce_mean(self.feature_sty, axis=[0, 1, 2])
+        self.std = tf.reduce_mean(tf.abs(self.feature_sty - self.mean),
+                                  axis=[0, 1, 2])
+        self.mean, self.var = tf.nn.moments(self.feature_sty, [0, 1, 2])
+        self.std = tf.sqrt(1e-16 + self.var)
+        '''
+        self.mean, self.var = tf.nn.moments(self.feature_sty, [0, 1, 2])
+        print 'tmp', self.ten_sh(tmp)
+        self.std = tf.sqrt(self.var+1e-16)
+        self.mean = tf.squeeze(self.mean)
+        self.std = tf.squeeze(self.std)
+        '''
         print 'mean', self.ten_sh(self.mean)
         # Adaptive Instance Normalization
         self.AdaIn = tf.nn.batch_normalization(x=self.feature_con,
@@ -31,8 +42,9 @@ class vincent:
                                                variance=self.std,
                                                offset=self.mean,
                                                scale=self.std,
-                                               variance_epsilon=1e-6
+                                               variance_epsilon=1e-5
                                                )
+        '''
         self.tconv4_1 = self.tconv_ly(self.AdaIn, 512, 256, 'tc4_1')
         self.up3 = self.up_sampling(self.tconv4_1, 'up_3')
         self.tconv3_4 = self.tconv_ly(self.up3, 256, 256, 'tc3_4')
@@ -45,9 +57,13 @@ class vincent:
         self.up1 = self.up_sampling(self.tconv2_1, 'up_1')
         self.tconv1_2 = self.tconv_ly(self.up1, 64, 64, 'tc1_2')
         self.tconv1_1 = self.tconv_ly(self.tconv1_2, 64, 3, 'tc1_1')
+        '''
+        self.tconv1_1 = self.decoder(self.AdaIn, 'decoder')
 
         self.output = self.tconv1_1*255.0
+        
         # loss
+        '''
         self.feature_2 = self.extractor(self.tconv1_1, name='extractor_2')
         self.content_loss = self.MSE(self.feature_2['conv4_1'], self.AdaIn)
         style_loss_list = []
@@ -67,45 +83,58 @@ class vincent:
 
         self.style_loss = tf.add_n(style_loss_list)
         self.loss = self.content_loss + tf.multiply(self.r, self.style_loss)
-        optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
+        #optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
         print(("build model finished: %ds" % (time.time() - start_time)))
         #optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
         #optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr)
-        self.opt = optimizer.minimize(self.loss)
+        #self.opt = optimizer.minimize(self.loss)
         #self.debug_opt = optimizer.minimize(self.debug_loss)
+        '''
         print(("build model finished: %ds" % (time.time() - start_time)))
 
     def extractor(self, image, name):
         with tf.variable_scope(name):
-            feature_dict = dict()
-            conv1_1 = self.conv_layer(image, "conv1_1")
-            feature_dict.update({'conv1_1': conv1_1})
-            conv1_2 = self.conv_layer(conv1_1, "conv1_2")
-            pool1 = self.max_pool(conv1_2, 'pool1')
-            conv2_1 = self.conv_layer(pool1, "conv2_1")
-            feature_dict.update({'conv2_1': conv2_1})
-            conv2_2 = self.conv_layer(conv2_1, "conv2_2")
-            pool2 = self.max_pool(conv2_2, 'pool2')
-            conv3_1 = self.conv_layer(pool2, "conv3_1")
-            feature_dict.update({'conv3_1': conv3_1})
-            conv3_2 = self.conv_layer(conv3_1, "conv3_2")
-            conv3_3 = self.conv_layer(conv3_2, "conv3_3")
-            conv3_4 = self.conv_layer(conv3_3, "conv3_4")
-            pool3 = self.max_pool(conv3_4, 'pool3')
-            conv4_1 = self.conv_layer(pool3, "conv4_1")
-            feature_dict.update({'conv4_1': conv4_1})
-            return feature_dict
+            conv0_1 = self.tconv_layer(image, "conv0_1")
+            conv1_1 = self.tconv_layer(conv0_1, "conv1_1")
+            conv1_2 = self.tconv_layer(conv1_1, "conv1_2")
+            up_1 = self.max_pool(conv1_2, 'up_1')
+
+            conv2_1 = self.tconv_layer(up_1, "conv2_1")
+            conv2_2 = self.tconv_layer(conv2_1, "conv2_2")
+            up_2 = self.max_pool(conv2_2, 'up_2')
+
+            conv3_1 = self.tconv_layer(up_2, "conv3_1")
+            conv3_2 = self.tconv_layer(conv3_1, "conv3_2")
+            conv3_3 = self.tconv_layer(conv3_2, "conv3_3")
+            conv3_4 = self.tconv_layer(conv3_3, "conv3_4")
+
+            up_3 = self.max_pool(conv3_4, 'up_3')
+            conv4_1 = self.tconv_layer(up_3, "conv3_5")
+
+            return conv4_1
+
+
     def decoder(self, fea, name):
         with tf.variable_scope(name):
-            tconv1_1
+            tconv1_1 = self.tconv_layer(fea, "tconv1_1")
+            up_1 = self.up_sampling(tconv1_1, 'up_1')
+            tconv2_1 = self.tconv_layer(up_1, "tconv2_1")
+            tconv2_2 = self.tconv_layer(tconv2_1, "tconv2_2")
+            tconv2_3 = self.tconv_layer(tconv2_2, "tconv2_3")
+            tconv2_4 = self.tconv_layer(tconv2_3, "tconv2_4")
+            up_2 = self.up_sampling(tconv2_4, 'up_2')
+            tconv3_1 = self.tconv_layer(up_2, "tconv3_1")
+            tconv3_2 = self.tconv_layer(tconv3_1, "tconv3_2")
+            up_3 = self.up_sampling(tconv3_2, 'up_3')
+            tconv4_1 = self.tconv_layer(up_3, "tconv4_1")
+            tconv4_2 = self.tconv_layer(tconv4_1, "tconv4_2")
+            return tconv4_2
 
     def MSE(self, target, pred):
         return tf.reduce_mean(tf.abs(tf.subtract(target, pred)))
 
     def up_sampling(self, bottom, name=None):
         size = self.ten_sh(bottom)[1:3]
-        print name
-        print 'size', np.multiply(size, 2)
         return tf.image.resize_nearest_neighbor(bottom, np.multiply(size, 2))
 
     def avg_pool(self, bottom, name=None):
@@ -117,14 +146,11 @@ class vincent:
                               strides=[1, 2, 2, 1], padding='SAME', name=name)
 
     def tconv_ly(self, bottom, in_channels, out_channels, name=None):
-        print name
         with tf.variable_scope(name):
             shape = self.ten_sh(bottom)
             shape[-1] = out_channels
-            print 'ori', self.ten_sh(bottom)
             bottom = tf.pad(bottom,
                             [[0, 0], [2, 2], [2, 2], [0, 0]], "REFLECT")
-            print 'bottom', self.ten_sh(bottom)
             init = ly.xavier_initializer_conv2d()
             output = ly.convolution2d_transpose(inputs=bottom,
                                                 num_outputs=out_channels,
@@ -157,14 +183,16 @@ class vincent:
     def tconv_layer(self, bottom, name):
         with tf.variable_scope(name):
             filt = self.get_conv_filter(name)
-            bottom = tf.pad(bottom,
-                            [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
-            conv = tf.nn.conv2d_transpose(bottom, filt, [1, 1, 1, 1], padding='VALID')
+            filt = tf.transpose(filt, perm=[2, 3, 1, 0])
+            if name != 'conv0_1':
+                bottom = tf.pad(bottom,
+                                [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
+            conv = tf.nn.conv2d(bottom, filt, [1, 1, 1, 1], padding='VALID')
             conv_biases = self.get_bias(name)
             bias = tf.nn.bias_add(conv, conv_biases)
-            relu = tf.nn.relu(bias)
-            return relu
-
+            if name != 'conv0_1':
+                bias = tf.nn.relu(bias)
+            return bias
 
     def fc_layer(self, bottom, name):
         with tf.variable_scope(name):
@@ -184,10 +212,16 @@ class vincent:
             return fc
 
     def get_conv_filter(self, name):
-        return tf.constant(self.data_dict[name]['weights'], name="filter")
+        try:
+            return tf.constant(self.data_dict[name]['weights'], name="filter")
+        except:
+            return tf.constant(np.float32(self.decoder_data_dict[name]['weights']), name="filter")
 
     def get_bias(self, name):
-        return tf.constant(self.data_dict[name]['biases'], name="biases")
+        try:
+            return tf.constant(self.data_dict[name]['biases'], name="biases")
+        except:
+            return tf.constant(np.float32(self.decoder_data_dict[name]['biases']), name="biases")
 
     def get_fc_weight(self, name):
         return tf.constant(self.data_dict[name][0], name="weights")
