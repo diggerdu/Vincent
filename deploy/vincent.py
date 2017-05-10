@@ -6,23 +6,19 @@ import time
 
 class vincent:
     def __init__(self, r=0., lr=1e-4, vgg19_npy_path=None):
-        self.data_dict = np.load(vgg19_npy_path, encoding='latin1').item()
-        self.data_dict = None
         self.decoder_data_dict = np.load('decoder.npy', encoding='latin1').item()
         print("npy file loaded")
         self.r = r
         self.lr = lr
 
-    def build(self, rgb):
+    def build(self, content, style):
         start_time = time.time()
         print("build model started")
-        rgb_scaled = rgb / 255.0
+        content = content / 255.0
+        style = style / 255.0
+        self.feature_con = self.extractor(content, name='extractor_con')
+        self.feature_sty = self.extractor(style, name='extractor_sty')
 
-        self.feature_1 = self.extractor(rgb_scaled, name='extractor_1')
-        fea_sh = self.ten_sh(self.feature_1)
-        feature_lists = tf.unpack(self.feature_1, axis=0)
-        self.feature_con = tf.stack(feature_lists[0:1])
-        self.feature_sty = tf.stack(feature_lists[1:])
         self.mean = tf.reduce_mean(self.feature_sty, axis=[0, 1, 2])
         self.std = tf.reduce_mean(tf.abs(self.feature_sty - self.mean),
                                   axis=[0, 1, 2])
